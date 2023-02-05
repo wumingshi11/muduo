@@ -2,13 +2,14 @@
 #include "muduo/base/LogFile.h"
 #include "muduo/base/ThreadPool.h"
 #include "muduo/base/TimeZone.h"
-
+#include "muduo/base/AsyncLogging.h"
 #include <stdio.h>
 #include <unistd.h>
 
 int g_total;
 FILE* g_file;
 std::unique_ptr<muduo::LogFile> g_logFile;
+std::unique_ptr<muduo::AsyncLogging> g_asyncLog;
 
 void dummyOutput(const char* msg, int len)
 {
@@ -17,9 +18,13 @@ void dummyOutput(const char* msg, int len)
   {
     fwrite(msg, 1, len, g_file);
   }
-  else if (g_logFile)
+  else if (g_logFile.get() != nullptr)
   {
     g_logFile->append(msg, len);
+  } 
+  else if (g_asyncLog) 
+  {
+    g_asyncLog->append(msg, len);
   }
 }
 
@@ -29,7 +34,7 @@ void bench(const char* type)
   muduo::Timestamp start(muduo::Timestamp::now());
   g_total = 0;
 
-  int n = 1000*1000;
+  int n = 1000*1000*10;
   const bool kLongLog = false;
   muduo::string empty = " ";
   muduo::string longStr(3000, 'X');
@@ -49,7 +54,7 @@ void bench(const char* type)
 void logInThread()
 {
   LOG_INFO << "logInThread";
-  usleep(1000);
+  usleep(1);
 }
 
 int main()
@@ -89,13 +94,25 @@ int main()
   bench("/tmp/log");
   fclose(g_file);
 
+  g_file = fopen("./test_log", "w");
+  setbuffer(g_file, buffer, sizeof buffer);
+  bench("./test/log");
+  fclose(g_file);
+
   g_file = NULL;
   g_logFile.reset(new muduo::LogFile("test_log_st", 500*1000*1000, false));
   bench("test_log_st");
 
   g_logFile.reset(new muduo::LogFile("test_log_mt", 500*1000*1000, true));
   bench("test_log_mt");
-  g_logFile.reset();
+  g_logFile.reset(nullptr);
+
+  //g_logFile.reset(nullptr);
+  g_asyncLog.reset(new muduo::AsyncLogging("test_log_async", 500*1000*1000));
+  g_asyncLog->start();
+  bench("test_log_async");
+  g_asyncLog.reset();
+
 
   {
   g_file = stdout;
